@@ -12,7 +12,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  # --- Job 1: Build for Windows ---
+  build-windows:
+    name: Build for Windows
     runs-on: windows-latest
 
     steps:
@@ -24,6 +26,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
         run: |
@@ -32,52 +35,96 @@ jobs:
         shell: pwsh
 
       # --- Step 1: Generate the base .spec file ---
-      - name: Generate PyInstaller Spec File
+      - name: Generate PyInstaller Spec File (Windows)
         run: |
-          # Generate spec without --add-data initially
+          # Generate spec without --add-data and WITHOUT --noconfirm
           # Include other necessary options like --windowed, --onefile, --name, --hidden-import
-          pyi-makespec --noconfirm --onefile --windowed --name FenceGameOnline --hidden-import pygame.scrap --hidden-import imageio --hidden-import numpy --hidden-import pyperclip main.py
+          pyi-makespec --onefile --windowed --name FenceGameOnline --hidden-import pygame.scrap --hidden-import imageio --hidden-import numpy --hidden-import pyperclip main.py
         shell: pwsh
 
       # --- Step 2: Modify the .spec file to add data ---
-      - name: Add data files to Spec File
+      - name: Add data files to Spec File (Windows)
         run: |
-          # Read the generated spec file content
           $specFile = "FenceGameOnline.spec"
           $specContent = Get-Content -Path $specFile -Raw
-
-          # Define the data tuple format expected by PyInstaller spec files: [('source_path', 'destination_in_bundle')]
-          $dataToAdd = "[('sprites', 'sprites')]" # Add the sprites folder to the root of the bundle
-
-          # Replace the empty datas=[] list using regex for flexibility with whitespace
-          # Matches 'datas=', optional whitespace, [], optional whitespace inside []
+          $dataToAdd = "[('sprites', 'sprites')]"
           $modifiedContent = $specContent -replace 'datas=\s*\[\s*\]', "datas=$dataToAdd"
-
-          # Verify the replacement happened (optional but good practice)
           if ($specContent -eq $modifiedContent) {
-            Write-Error "Failed to find and replace 'datas=[]' in $specFile. Spec file content:"
-            Write-Error $specContent
-            exit 1 # Fail the step if replacement didn't occur
+            Write-Error "Failed to find and replace 'datas=[]' in $specFile."
+            exit 1
           }
-
-          # Write the modified content back to the spec file
           Set-Content -Path $specFile -Value $modifiedContent
-
-          Write-Host "Successfully added datas to $specFile. New content:"
-          Get-Content -Path $specFile # Print the modified spec file content for verification
+          Write-Host "Successfully added datas to $specFile."
         shell: pwsh
 
       # --- Step 3: Build the executable using the modified .spec file ---
-      - name: Build executable from Spec File
+      - name: Build executable from Spec File (Windows)
         run: |
-          # Run PyInstaller using the modified spec file
+          # Run PyInstaller using the modified spec file - WITH --noconfirm here
           pyinstaller --noconfirm FenceGameOnline.spec
         shell: pwsh
 
       # --- Step 4: Upload the artifact ---
-      - name: Upload artifact
+      - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
         with:
           name: FenceGameOnline-Windows-Executable
           path: dist/FenceGameOnline.exe
+          if-no-files-found: error
+
+  # --- Job 2: Build for macOS ---
+  build-macos:
+    name: Build for macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Using direct build for macOS, assuming path separator works
+      - name: Build .app bundle with PyInstaller (macOS)
+        run: |
+          # --noconfirm IS valid for the main pyinstaller command
+          pyinstaller --noconfirm \
+            --onefile \
+            --windowed \
+            --name "FenceGameOnline" \
+            --add-data "sprites:sprites" \
+            --hidden-import pygame.scrap \
+            --hidden-import imageio \
+            --hidden-import numpy \
+            --hidden-import pyperclip \
+            main.py
+
+      - name: Create DMG
+        run: |
+          if [ ! -d "dist/FenceGameOnline.app" ]; then
+            echo "Error: dist/FenceGameOnline.app not found after PyInstaller build!"
+            ls -l dist
+            exit 1
+          fi
+          hdiutil create -volname "Fence Game Online" \
+                         -srcfolder "dist/FenceGameOnline.app" \
+                         -ov \
+                         -format UDZO \
+                         "dist/FenceGameOnline-macOS.dmg"
+          echo "DMG created successfully at dist/FenceGameOnline-macOS.dmg"
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FenceGameOnline-macOS-DMG
+          path: dist/FenceGameOnline-macOS.dmg
           if-no-files-found: error
