@@ -5,83 +5,79 @@ on:
   push:
     branches: [ main ]
     paths:
-      # Trigger on changes to any Python file
       - '**.py'
-      # Trigger on changes to assets (like the GIF)
       - 'sprites/**'
-      # Trigger on changes to the requirements file
       - 'requirements.txt'
-      # Trigger on changes to the workflow itself
       - '.github/workflows/main.yml'
-  workflow_dispatch: # Allow manual triggering
+  workflow_dispatch:
 
 jobs:
   build:
-    # The type of runner that the job will run on
-    runs-on: windows-latest # Build on Windows
+    runs-on: windows-latest
 
     steps:
-      #--------------------------------------------------
-      # Step 1: Check out the repository code
-      #--------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
-        # Fetches the code from your repository
 
-      #--------------------------------------------------
-      # Step 2: Set up the Python environment
-      #--------------------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # Use a specific Python version
-          cache: 'pip' # Enable caching for pip dependencies
-          # cache-dependency-path is not needed here as it will find requirements.txt by default
+          python-version: '3.11'
+          cache: 'pip'
 
-      #--------------------------------------------------
-      # Step 3: Install Python dependencies
-      #--------------------------------------------------
       - name: Install dependencies
         run: |
-          # Upgrade pip to the latest version
           python -m pip install --upgrade pip
-          # Install all packages listed in the requirements.txt file
           pip install -r requirements.txt
-        shell: pwsh # Use PowerShell for the run command
+        shell: pwsh
 
-      #--------------------------------------------------
-      # Step 4: Build the executable using PyInstaller
-      #--------------------------------------------------
-      - name: Build executable with PyInstaller
+      # --- Step 1: Generate the base .spec file ---
+      - name: Generate PyInstaller Spec File
         run: |
-          # Use --% to stop PowerShell from interpreting PyInstaller arguments
-          # The entire PyInstaller command should be on one line after --%
+          # Generate spec without --add-data initially
+          # Include other necessary options like --windowed, --onefile, --name, --hidden-import
+          pyi-makespec --noconfirm --onefile --windowed --name FenceGameOnline --hidden-import pygame.scrap --hidden-import imageio --hidden-import numpy --hidden-import pyperclip main.py
+        shell: pwsh
 
-          # --noconfirm: Overwrite previous builds without asking
-          # --onefile: Create a single executable file
-          # --windowed: Prevents a console window from opening with the GUI app
-          # --name: Specifies the name of the final executable
-          # --add-data "source:destination": Bundles data files/folders.
-          #   "sprites:sprites" copies the local 'sprites' folder into a 'sprites'
-          #   folder within the bundled app, making it accessible via relative paths
-          #   (use the resource_path helper function in your code).
-          # --hidden-import: Helps PyInstaller find modules that might be missed
-          #   due to dynamic or conditional imports (e.g., in try-except blocks).
-          # main.py: Your game's main script (the entry point).
-          pyinstaller --% --noconfirm --onefile --windowed --name FenceGameOnline --add-data "sprites:sprites" --hidden-import pygame.scrap --hidden-import imageio --hidden-import numpy --hidden-import pyperclip main.py
-        shell: pwsh # Use PowerShell for the run command
+      # --- Step 2: Modify the .spec file to add data ---
+      - name: Add data files to Spec File
+        run: |
+          # Read the generated spec file content
+          $specFile = "FenceGameOnline.spec"
+          $specContent = Get-Content -Path $specFile -Raw
 
-      #--------------------------------------------------
-      # Step 5: Upload the executable as a build artifact
-      #--------------------------------------------------
+          # Define the data tuple format expected by PyInstaller spec files: [('source_path', 'destination_in_bundle')]
+          $dataToAdd = "[('sprites', 'sprites')]" # Add the sprites folder to the root of the bundle
+
+          # Replace the empty datas=[] list using regex for flexibility with whitespace
+          # Matches 'datas=', optional whitespace, [], optional whitespace inside []
+          $modifiedContent = $specContent -replace 'datas=\s*\[\s*\]', "datas=$dataToAdd"
+
+          # Verify the replacement happened (optional but good practice)
+          if ($specContent -eq $modifiedContent) {
+            Write-Error "Failed to find and replace 'datas=[]' in $specFile. Spec file content:"
+            Write-Error $specContent
+            exit 1 # Fail the step if replacement didn't occur
+          }
+
+          # Write the modified content back to the spec file
+          Set-Content -Path $specFile -Value $modifiedContent
+
+          Write-Host "Successfully added datas to $specFile. New content:"
+          Get-Content -Path $specFile # Print the modified spec file content for verification
+        shell: pwsh
+
+      # --- Step 3: Build the executable using the modified .spec file ---
+      - name: Build executable from Spec File
+        run: |
+          # Run PyInstaller using the modified spec file
+          pyinstaller --noconfirm FenceGameOnline.spec
+        shell: pwsh
+
+      # --- Step 4: Upload the artifact ---
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          # Name of the artifact bundle that will be downloadable from the Actions run
           name: FenceGameOnline-Windows-Executable
-          # Path to the executable file created by PyInstaller in the 'dist' directory
           path: dist/FenceGameOnline.exe
-          # Optional: Control the retention period of the artifact (e.g., '7 days')
-          # retention-days: 7
-          # Optional: Fail the workflow step if the specified file isn't found
           if-no-files-found: error
