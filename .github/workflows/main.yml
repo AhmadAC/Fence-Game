@@ -1,0 +1,68 @@
+# .github/workflows/main.yml
+name: Build Fence Game Executable
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      # Trigger on changes to any Python file
+      - '**.py'
+      # Trigger on changes to assets (like the GIF)
+      - 'sprites/**'
+      # Trigger on changes to the workflow itself
+      - '.github/workflows/main.yml'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  build:
+    runs-on: windows-latest # Build on Windows
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        # Fetches the code from your repository
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # Use a specific Python version
+          cache: 'pip' # Cache pip dependencies for faster builds
+
+      - name: Install dependencies
+        run: |
+          # Upgrade pip first
+          python -m pip install --upgrade pip
+          # Install PyInstaller and required game libraries
+          # pygame is the core library
+          # imageio and numpy are needed for GIF loading in drawcode.py/entities.py
+          # pyperclip is used conditionally in main.py for clipboard access
+          pip install pyinstaller==6.8.0 pygame==2.5.2 imageio==2.34.1 numpy==1.26.4 pyperclip==1.9.0
+        shell: pwsh # Use PowerShell
+
+      - name: Build executable with PyInstaller
+        run: |
+          # Use --% to stop PowerShell parsing arguments meant for pyinstaller
+          # Put the command on a single line after --% for safety
+
+          # --noconfirm: Don't ask for confirmation (for automation)
+          # --onefile: Bundle everything into a single .exe
+          # --windowed: Create a GUI app without a console window (suitable for Pygame)
+          # --name: The desired name for the output executable
+          # --add-data "source:destination": Bundles assets.
+          #   "sprites:sprites" copies the entire 'sprites' folder into the root
+          #   of the bundled app, preserving the relative path used in the code (e.g., "sprites/fire2.gif").
+          # --hidden-import: Helps PyInstaller find modules it might miss, especially
+          #   those imported conditionally or dynamically (like pygame.scrap, imageio, numpy, pyperclip).
+          # main.py: The main entry point script of your game.
+          pyinstaller --% --noconfirm --onefile --windowed --name FenceGameOnline --add-data "sprites:sprites" --hidden-import pygame.scrap --hidden-import imageio --hidden-import numpy --hidden-import pyperclip main.py
+        shell: pwsh # Use PowerShell
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # Name of the artifact bundle that will be available for download
+          name: FenceGameOnline-Windows-Executable
+          # Path to the executable file created by PyInstaller
+          path: dist/FenceGameOnline.exe
+          # Fail the workflow if the executable wasn't created
+          if-no-files-found: error
