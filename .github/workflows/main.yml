@@ -9,60 +9,79 @@ on:
       - '**.py'
       # Trigger on changes to assets (like the GIF)
       - 'sprites/**'
+      # Trigger on changes to the requirements file
+      - 'requirements.txt'
       # Trigger on changes to the workflow itself
       - '.github/workflows/main.yml'
   workflow_dispatch: # Allow manual triggering
 
 jobs:
   build:
+    # The type of runner that the job will run on
     runs-on: windows-latest # Build on Windows
 
     steps:
+      #--------------------------------------------------
+      # Step 1: Check out the repository code
+      #--------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
         # Fetches the code from your repository
 
+      #--------------------------------------------------
+      # Step 2: Set up the Python environment
+      #--------------------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11' # Use a specific Python version
-          cache: 'pip' # Cache pip dependencies for faster builds
+          cache: 'pip' # Enable caching for pip dependencies
+          # cache-dependency-path is not needed here as it will find requirements.txt by default
 
+      #--------------------------------------------------
+      # Step 3: Install Python dependencies
+      #--------------------------------------------------
       - name: Install dependencies
         run: |
-          # Upgrade pip first
+          # Upgrade pip to the latest version
           python -m pip install --upgrade pip
-          # Install PyInstaller and required game libraries
-          # pygame is the core library
-          # imageio and numpy are needed for GIF loading in drawcode.py/entities.py
-          # pyperclip is used conditionally in main.py for clipboard access
-          pip install pyinstaller==6.8.0 pygame==2.5.2 imageio==2.34.1 numpy==1.26.4 pyperclip==1.9.0
-        shell: pwsh # Use PowerShell
+          # Install all packages listed in the requirements.txt file
+          pip install -r requirements.txt
+        shell: pwsh # Use PowerShell for the run command
 
+      #--------------------------------------------------
+      # Step 4: Build the executable using PyInstaller
+      #--------------------------------------------------
       - name: Build executable with PyInstaller
         run: |
-          # Use --% to stop PowerShell parsing arguments meant for pyinstaller
-          # Put the command on a single line after --% for safety
+          # Use --% to stop PowerShell from interpreting PyInstaller arguments
+          # The entire PyInstaller command should be on one line after --%
 
-          # --noconfirm: Don't ask for confirmation (for automation)
-          # --onefile: Bundle everything into a single .exe
-          # --windowed: Create a GUI app without a console window (suitable for Pygame)
-          # --name: The desired name for the output executable
-          # --add-data "source:destination": Bundles assets.
-          #   "sprites:sprites" copies the entire 'sprites' folder into the root
-          #   of the bundled app, preserving the relative path used in the code (e.g., "sprites/fire2.gif").
-          # --hidden-import: Helps PyInstaller find modules it might miss, especially
-          #   those imported conditionally or dynamically (like pygame.scrap, imageio, numpy, pyperclip).
-          # main.py: The main entry point script of your game.
+          # --noconfirm: Overwrite previous builds without asking
+          # --onefile: Create a single executable file
+          # --windowed: Prevents a console window from opening with the GUI app
+          # --name: Specifies the name of the final executable
+          # --add-data "source:destination": Bundles data files/folders.
+          #   "sprites:sprites" copies the local 'sprites' folder into a 'sprites'
+          #   folder within the bundled app, making it accessible via relative paths
+          #   (use the resource_path helper function in your code).
+          # --hidden-import: Helps PyInstaller find modules that might be missed
+          #   due to dynamic or conditional imports (e.g., in try-except blocks).
+          # main.py: Your game's main script (the entry point).
           pyinstaller --% --noconfirm --onefile --windowed --name FenceGameOnline --add-data "sprites:sprites" --hidden-import pygame.scrap --hidden-import imageio --hidden-import numpy --hidden-import pyperclip main.py
-        shell: pwsh # Use PowerShell
+        shell: pwsh # Use PowerShell for the run command
 
+      #--------------------------------------------------
+      # Step 5: Upload the executable as a build artifact
+      #--------------------------------------------------
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          # Name of the artifact bundle that will be available for download
+          # Name of the artifact bundle that will be downloadable from the Actions run
           name: FenceGameOnline-Windows-Executable
-          # Path to the executable file created by PyInstaller
+          # Path to the executable file created by PyInstaller in the 'dist' directory
           path: dist/FenceGameOnline.exe
-          # Fail the workflow if the executable wasn't created
+          # Optional: Control the retention period of the artifact (e.g., '7 days')
+          # retention-days: 7
+          # Optional: Fail the workflow step if the specified file isn't found
           if-no-files-found: error
